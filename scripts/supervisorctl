@@ -1,0 +1,56 @@
+#!/bin/bash
+# Stand-in for supervisorctl, for Moonraker's "supervisord_cli" provider.
+# The services are kept running by /home/gem/infimech/svc/svc_loop.sh
+# (see /run.sh): restart = end the process (its loop starts it again),
+# stop = flag + end, start = remove the flag.
+# Moonraker runs "status" every 2 seconds, so it is kept cheap: one grep
+# over /proc, everything else in bash itself (version 2).
+FLAGS=${FLAGS:-/run/infimech}
+ALL="klipper moonraker klipper_mcu"
+[ "${1:-}" = -c ] && shift 2
+declare -A PID=()
+scan() {
+    local line f p a
+    while IFS= read -r line; do
+        f=${line%%:*}; p=${f#/proc/}; p=${p%/cmdline}
+        # only the program itself: argv[0] the interpreter/binary, argv[1] the script
+        { mapfile -d "" -t a < "$f"; } 2>/dev/null || continue
+        case "${a[0]:-}|${a[1]:-}" in
+            *python*\|*klippy/klippy.py)          [ -n "${PID[klipper]:-}" ] || PID[klipper]=$p ;;
+            *python*\|*moonraker/moonraker.py)    [ -n "${PID[moonraker]:-}" ] || PID[moonraker]=$p ;;
+            *klipper.elf\|*|*bin/klipper_mcu\|*)  [ -n "${PID[klipper_mcu]:-}" ] || PID[klipper_mcu]=$p ;;
+        esac
+    done < <(grep -a -l -E 'klippy/klippy\.py|moonraker/moonraker\.py|klipper\.elf|bin/klipper_mcu' \
+             /proc/[0-9]*/cmdline 2>/dev/null)
+}
+uptime_of() {
+    local st up s
+    read -r -a st < "/proc/$1/stat" 2>/dev/null || { echo 0:00:00; return; }
+    read -r up _ < /proc/uptime; up=${up%.*}
+    s=$(( up - ${st[21]} / 100 )); [ $s -lt 0 ] && s=0
+    printf '%d:%02d:%02d\n' $((s / 3600)) $((s / 60 % 60)) $((s % 60))
+}
+end_it() {   # pid: end the process in the background (Moonraker may be ending itself)
+    [ -n "$1" ] || return 0
+    setsid -f bash -c "sleep 0.5; kill $1 2>/dev/null; for i in \$(seq 20); do [ -d /proc/$1 ] || exit 0; sleep 0.5; done; kill -9 $1 2>/dev/null" \
+        > /dev/null 2>&1 < /dev/null
+}
+cmd=${1:-status}; shift
+names="$*"; [ -z "$names" ] || [ "$names" = all ] && names=$ALL
+[ -d "$FLAGS" ] || mkdir -p "$FLAGS"
+scan
+for n in $names; do
+    case " $ALL " in *" $n "*) ;; *) [ "$cmd" = status ] || echo "$n: ERROR (no such process)"; continue ;; esac
+    pid=${PID[$n]:-}
+    case $cmd in
+        status)
+            if [ -n "$pid" ]; then echo "$n                   RUNNING   pid $pid, uptime $(uptime_of "$pid")"
+            elif [ -f "$FLAGS/stop_$n" ]; then echo "$n                   STOPPED   stopped by request"
+            else echo "$n                   STARTING"; fi ;;
+        stop)    : > "$FLAGS/stop_$n"; end_it "$pid"; echo "$n: stopped" ;;
+        start)   rm -f "$FLAGS/stop_$n"; echo "$n: started" ;;
+        restart) rm -f "$FLAGS/stop_$n"; end_it "$pid"; echo "$n: stopped"; echo "$n: started" ;;
+        *)       echo "*** Unknown syntax: $cmd"; exit 2 ;;
+    esac
+done
+exit 0

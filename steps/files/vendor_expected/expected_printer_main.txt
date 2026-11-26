@@ -1,0 +1,26 @@
+#OCTO-printer.cfg-v1.0.1-20240925
+[include fluidd.cfg]
+[include timelapse.cfg]
+[virtual_sdcard]
+path:@GCODES@
+on_error_gcode: CANCEL_PRINT
+[include printer_config.cfg]
+
+[include TEST_SPEED.cfg]
+
+[mcu rpi]
+serial: /tmp/klipper_host_mcu
+[smart_effector]
+z_offset: -0.02
+[heater_bed]
+control: pid
+pid_Kp=66.771
+pid_Ki=0.814
+pid_Kd=1369.644
+[skew_correction]
+
+[extruder]
+#control: pid
+#pid_Kp=37.626
+#pid_Ki=5.972
+#pid_Kd=59.261

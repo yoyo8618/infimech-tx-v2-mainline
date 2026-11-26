@@ -1,6 +1,6 @@
 # Infimech TX V2 → mainline Klipper, Debian 12, updates from Fluidd
 
-**Status:** working on one printer (mine) since Nov 2026, with prints running normally. This is a description of what was done, not a one-click installer yet. **Feedback wanted**: open an Issue.
+**Status:** working on one printer (mine) since Nov 2026, with prints running normally. This describes what was done. The scripts for each step are in [`steps/`](steps/README.md); it's not a one-click installer. **Feedback wanted**: open an Issue.
 
 > **How this was made:** the scripts, add-on modules and config changes were written with an AI assistant (Claude). I ran and checked every step on my own TX V2. Read the scripts before you run them, run the `--check` modes first, and **make the backup in step 1**.
 
@@ -136,8 +136,7 @@ If a flash fails, the STM32 stays in its bootloader (safe), and running the scri
   - `glibc_tx_edit.py`, `pc_glibc.sh`: build the glibc yourself
   - `supervisorctl`: service control for Moonraker
   - `boot/`: `run.sh`, the restart loop, start scripts, the HelixScreen launcher (steps 4, 6, 7)
-
-The scripts that did steps 3–7 on my printer (installing, config changes, building the Debian 12 system) were written step by step for that one printer, so they aren't here yet. I'm turning them into an installer.
+- `steps/`: **scripts for steps 3–7**, one per step, each with a `--check` mode and a way back. Start with [`steps/README.md`](steps/README.md). They're consolidated from the step-by-step packages that ran on my printer, and so far tested in simulation only. Testers wanted.
 
 License: GPLv3 (see `LICENSE`). The STM32 firmware is built from unmodified Klipper. The glibc packages are LGPL: their source is Debian's, plus `scripts/glibc_tx_edit.py`.
 

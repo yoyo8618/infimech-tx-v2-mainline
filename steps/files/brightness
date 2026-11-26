@@ -1,0 +1,12 @@
+#!/bin/sh
+# Infimech TX V2 backlight helper for HelixScreen (its "brightness" backend
+# runs: brightness -s 0|1 for off/on, brightness -d 0..255 for the level).
+# GPIO 232 switches the backlight (1 on, 0 off); the panel cannot dim, so
+# a level of 0 means off and any other level is ignored.
+# Installed by /home/gem/infimech/screen_install.sh
+G=/sys/class/gpio/gpio232/value
+case "$1" in
+    -s) if [ "$2" = 0 ]; then echo 0 > $G; else echo 1 > $G; fi ;;
+    -d) if [ "$2" = 0 ]; then echo 0 > $G; fi ;;
+esac
+exit 0

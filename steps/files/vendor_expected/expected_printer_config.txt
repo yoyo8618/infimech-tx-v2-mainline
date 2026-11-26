@@ -11,7 +11,6 @@ kinematics: corexy
 max_velocity: 600
 max_accel: 20000
 #max_accel_to_decel: 8000
-minimum_cruise_ratio: 0.5
 max_z_velocity: 30
 max_z_accel: 800
 square_corner_velocity: 5.0
@@ -23,7 +22,6 @@ sensor_type: temperature_host
 step_pin: PC15
 dir_pin: PC14
 enable_pin: !PC2
-# rotation_distance: 40
 rotation_distance:@ROT_X@
 microsteps: 16
 full_steps_per_rotation: 200
@@ -50,7 +48,6 @@ diag_pin:PB4
 step_pin: PA1
 dir_pin: PA0
 enable_pin: !PA2
-# rotation_distance: 40
 rotation_distance:@ROT_Y@
 microsteps: 16
 full_steps_per_rotation: 200

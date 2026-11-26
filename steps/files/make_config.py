@@ -21,7 +21,8 @@
 # uses the v1.0.20 values; the differences are printed.
 # Not compared, carried over: a [temperature_sensor CHAMBER] section (not in
 # any vendor config; an owner addition). Not compared: [printer]
-# minimum_cruise_ratio: 0.5 (Klipper's default).
+# minimum_cruise_ratio: 0.5 (Klipper's default; some owners add it for
+# TEST_SPEED.cfg).
 # printer.cfg (the short main file) is checked section by section: only the
 # stock sections are allowed (includes, virtual_sdcard, mcu rpi,
 # smart_effector, heater_bed, and optionally extruder PID and an empty

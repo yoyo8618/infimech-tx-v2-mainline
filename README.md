@@ -29,9 +29,21 @@ ssh root@<PRINTER_IP> "tar -C /server --exclude=./tmp/proc --exclude=./tmp/sys -
 ```
 Compare `md5sum` on the printer with `certutil -hashfile <file> MD5` on the PC.
 
-## 2. Block vendor updates
+## 2. Block vendor updates (do this first)
 
-A vendor update can overwrite all of this. In your DNS (AdGuard, Pi-hole, router), point `*.octopusworks.com` at **any local IP that answers ping**. Don't block it outright: Tina pings that host to choose between Ethernet and Wi-Fi. Never accept updates from the stock screen.
+**A vendor (Infimech/OctopusWorks) firmware update can undo all of this.** It's built for the stock layout. It's likely to replace Klipper and its config in `/server/tmp`, reflash the stock STM32 firmware and reset the start scripts. Your backup from step 1 would get you back, but it's easier not to let one in.
+
+What's known about the stock software:
+- The update client is in the stock touchscreen app (`/opt/FdmPrinter`), which talks to `slice-update.octopusworks.com`. Whether it ever installs without asking is unknown, so treat it as if it could.
+- Tina's `Network_select` pings `update.octopusworks.com` in a loop to choose between Ethernet and Wi-Fi.
+- The stock screen also has a raw address for uploading logs: `120.77.245.96:8084/printer/log/upload`. A DNS rule can't block a raw address.
+
+What to do:
+1. In your DNS (AdGuard Home, Pi-hole, router), add a rewrite for `*.octopusworks.com` pointing to **any local IP that answers ping** (another device on your network). Don't block the name outright: if the ping fails, Tina thinks the network is down and keeps switching between Ethernet and Wi-Fi.
+2. Optionally, block outgoing traffic to `120.77.245.96` in your router's firewall.
+3. Never accept an update offered on the stock screen. With HelixScreen installed, the stock screen only comes back as a fallback.
+
+After the conversion, mainline updates come only from Fluidd (Settings → Software Updates). Nothing updates by itself: Moonraker's automatic refresh is off, and HelixScreen's own updater is disabled.
 
 ## 3. Mainline Klipper next to stock
 

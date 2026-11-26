@@ -8,15 +8,18 @@
 # folder to --out. Nothing in --old is changed.
 #
 # Before building, it checks that the HARDWARE part of the stock config is
-# the one these templates were made from (#OCTO-v1.0.20-20250430 /
-# #OCTO-printer.cfg-v1.0.1-20240925): every section of printer_config.cfg
-# except the macros ([gcode_macro ...], [delayed_gcode ...]), compared without
-# comments, apart from the few values that may differ per printer (MCU
-# serial, bed heater check time, save_variables file). Macros are not
-# compared: the mainline config replaces all of them, so your own macro
-# changes don't matter (they stay in the backup, config_stock).
-# A different hardware part means a different vendor config: it stops,
-# writes a diff, and builds nothing.
+# a known vendor version (VENDOR_VERSIONS below, by the #OCTO-... first line
+# of printer_config.cfg): every section of printer_config.cfg except the
+# macros ([gcode_macro ...], [delayed_gcode ...]) and [homing_override],
+# compared without comments, apart from the values that may differ per
+# printer (MCU serial, bed heater check time, save_variables file, X/Y
+# rotation_distance). Macros are not compared: the mainline config replaces
+# all of them, so your own macro changes don't matter (they stay in the
+# backup, config_stock). A different hardware part means a different vendor
+# config: it stops, writes a diff, and builds nothing.
+# The templates were made from v1.0.20. With an older version the new config
+# uses the v1.0.20 values; the differences are printed. The chamber sensor
+# (new in v1.0.20) is left out if your config does not have it.
 # printer.cfg (the short main file) is checked section by section: only the
 # stock sections are allowed (includes, virtual_sdcard, mcu rpi,
 # smart_effector, heater_bed, and optionally extruder PID and an empty
@@ -33,6 +36,14 @@ import re
 import shutil
 import sys
 
+# first line of printer_config.cfg -> its hardware reference
+VENDOR_VERSIONS = {
+    '#OCTO-v1.0.20-20250430': 'expected_printer_config.txt',
+    '#OCTO-v1.0.18-20241213': 'expected_printer_config-v1.0.18.txt',
+    '#OCTO-v1.0.17-20240925': 'expected_printer_config-v1.0.17.txt',
+    '#OCTO-v1.0.15-20240904': 'expected_printer_config-v1.0.15.txt',
+}
+TEMPLATE_VERSION = '#OCTO-v1.0.20-20250430'
 MARKER = '#*# <---------------------- SAVE_CONFIG ---------------------->'
 CLEAN_FILES = ['printer_config.cfg', 'fans_stock.cfg', 'fans_mainline.cfg',
                'macros.cfg', 'screen.cfg', 'infimech.cfg']
@@ -90,8 +101,15 @@ def section_of(lines):
 def normalize_printer_config(lines, found):
     out = list(lines)
     serials, gains, wipe1, wipe2, savevars = [], [], [], [], []
+    rot = {'stepper_x': [], 'stepper_y': []}
     for i, sec in section_of(lines):
         l = lines[i]
+        if sec in rot:
+            m = re.match(r'^rotation_distance\s*[:=]\s*([0-9.]+)\s*$', l)
+            if m:
+                rot[sec].append(m.group(1))
+                out[i] = 'rotation_distance:@ROT_%s@' % sec[-1].upper()
+                continue
         if sec == 'mcu':
             m = re.match(r'^serial\s*:\s*(\S+)$', l)
             if m:
@@ -136,7 +154,8 @@ def normalize_printer_config(lines, found):
                 out[s:s + len(body)] = ['@SAVE_CONFIG_MACRO@']
                 break
     found.update(serials=serials, gains=gains, wipe1=wipe1, wipe2=wipe2,
-                 savevars=savevars)
+                 savevars=savevars, rot_x=rot['stepper_x'],
+                 rot_y=rot['stepper_y'])
     return strip_tail(out)
 
 
@@ -226,7 +245,7 @@ def check_printer_main(lines, diff_path):
     return vals
 
 
-MACRO_SECTIONS = ('gcode_macro', 'delayed_gcode')
+MACRO_SECTIONS = ('gcode_macro', 'delayed_gcode', 'homing_override')
 
 
 def hardware_only(lines):
@@ -329,11 +348,47 @@ def build(args):
 
     found = {}
     # --- printer_config.cfg
-    pc = normalize_printer_config(
-        read_lines(os.path.join(old, 'printer_config.cfg')), found)
+    pc_lines = read_lines(os.path.join(old, 'printer_config.cfg'))
+    version = pc_lines[0].strip() if pc_lines else ''
+    if version not in VENDOR_VERSIONS:
+        raise Refused("printer_config.cfg starts with %r; known vendor versions: %s"
+                      % (version, ', '.join(sorted(VENDOR_VERSIONS))))
+    pc = normalize_printer_config(pc_lines, found)
     compare('printer_config.cfg', pc,
-            os.path.join(tpl, 'expected_printer_config.txt'), diff_path,
+            os.path.join(tpl, VENDOR_VERSIONS[version]), diff_path,
             hardware_only)
+    rot = {}
+    for axis in ('x', 'y'):
+        v = one_value(found, 'rot_' + axis, 'stepper_%s rotation_distance' % axis)
+        if not 39.0 <= float(v) <= 41.0:
+            raise Refused("stepper_%s rotation_distance %s is outside 39-41"
+                          % (axis, v))
+        rot['@ROT_%s@' % axis.upper()] = v
+    chamber = any(l.strip().lower() == '[temperature_sensor chamber]'
+                  for l in pc_lines)
+    # values the v1.0.20 templates set differently from your vendor version
+    newer = []
+    if version != TEMPLATE_VERSION:
+        def with_sec(lines):
+            out_, sec = [], None
+            for l in hardware_only(lines):
+                m = re.match(r'^\[([^\]]+)\]', l)
+                if m:
+                    sec = m.group(1).strip()
+                    continue
+                if sec.lower().startswith('include ') or (
+                        not chamber and sec.lower() == 'temperature_sensor chamber'):
+                    continue
+                out_.append('[%s] %s' % (sec, l.strip()))
+            return out_
+        have = with_sec(pc)
+        want = with_sec(read_lines(os.path.join(
+            tpl, VENDOR_VERSIONS[TEMPLATE_VERSION])))
+        sm = difflib.SequenceMatcher(None, have, want, autojunk=False)
+        for op, a1, a2, b1, b2 in sm.get_opcodes():
+            if op != 'equal':
+                newer.append((have[a1:a2], want[b1:b2]))
+
     serial = one_value(found, 'serials', 'MCU serial')
     if not serial.startswith('/dev/serial/by-id/usb-Klipper_stm32f072xb_'):
         raise Refused("unexpected MCU serial %s" % (serial,))
@@ -384,6 +439,7 @@ def build(args):
     values = {'@H@': home, '@MCU_SERIAL@': serial,
               '@WIPE1@': wipe1, '@WIPE2@': wipe2}
     values.update(cal)
+    values.update(rot)
     values['@EXTRUDER_PID@'] = ext_pid
     rendered = {}
     for f in CLEAN_FILES + ['printer.cfg']:
@@ -395,6 +451,12 @@ def build(args):
         if left:
             raise Refused("template %s: unfilled %s" % (f, left))
         rendered[f] = text
+    if not chamber:
+        text, n = re.subn(r'\n\[temperature_sensor CHAMBER\]\n(?:[^\n\[#][^\n]*\n)*', '\n',
+                          rendered['printer_config.cfg'])
+        if n != 1:
+            raise Refused("template printer_config.cfg: chamber sensor section not found")
+        rendered['printer_config.cfg'] = text
     for f in OPTIONAL:
         if f not in optional:
             rendered['printer.cfg'] = rendered['printer.cfg'].replace(
@@ -438,6 +500,16 @@ def build(args):
             fh.write(text)
         os.chmod(os.path.join(out, f), 0o644)
 
+    print("vendor config:         %s%s" % (version, '' if not newer else
+          '  (templates: %s)' % TEMPLATE_VERSION))
+    if newer:
+        print("  the new config uses the %s values here:" % (TEMPLATE_VERSION,))
+    for have, want in newer:
+        print("    yours: %s -> new: %s" % ('; '.join(have) or '(not set)',
+                                          '; '.join(want) or '(not set)'))
+    if not chamber:
+        print("chamber sensor:        not in your config, left out")
+    print("X/Y rotation_distance: %s / %s (kept)" % (rot['@ROT_X@'], rot['@ROT_Y@']))
     print("MCU serial:            %s (step 4 sets the new one)" % (serial,))
     print("saved variables:       %s" % (savevars,))
     print("bed check_gain_time:   %s -> 60%s" % (

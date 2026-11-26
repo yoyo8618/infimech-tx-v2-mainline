@@ -67,7 +67,8 @@ rm -rf "$TMP.tpl"
 if [ $rc != 0 ]; then
     [ -f "$G/infimech/step3-config.diff" ] && { echo "--- differences from the known vendor config:"; head -n 80 "$G/infimech/step3-config.diff"; }
     echo
-    echo "Your stock config is not the vendor version these steps were made from."
+    echo "Your stock config is not a known vendor version (v1.0.15, v1.0.17, v1.0.18, v1.0.20),"
+    echo "or its hardware part was changed."
     echo "Nothing was changed. Please send step3_check.txt and $G/infimech/step3-config.diff"
     echo "(it contains no personal data except your printer's own calibration values)."
     exit 1

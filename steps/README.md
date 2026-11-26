@@ -6,7 +6,9 @@ These scripts do steps 3–7 of the main [README](../README.md) on a stock Infim
 
 **Before you start**
 1. Do steps 1 (backup) and 2 (block vendor updates) of the guide.
-2. Step 3 builds the new config from **your** stock config, and keeps your calibration: the `SAVE_CONFIG` block, `z_offset`, bed PID, extruder PID and the nozzle wipe depths. It only works with the vendor hardware config these files were made from: `printer_config.cfg` starting with `#OCTO-v1.0.20-20250430`. Your own macros don't matter (they are replaced); only the hardware sections are compared. In `printer.cfg` only the stock sections may be there (`TEST_SPEED.cfg` and `[skew_correction]` are optional). With an older vendor config (for example v1.0.18, which has other X/Y `rotation_distance` values and no chamber sensor) or any other difference, it stops, changes nothing, and writes a diff. Please send that diff in an Issue.
+2. Step 3 builds the new config from **your** stock config, and keeps your calibration: the `SAVE_CONFIG` block, `z_offset`, bed PID, extruder PID, X/Y `rotation_distance` and the nozzle wipe depths. It works with these vendor versions of `printer_config.cfg` (its first line): `#OCTO-v1.0.20-20250430`, `#OCTO-v1.0.18-20241213`, `#OCTO-v1.0.17-20240925`, `#OCTO-v1.0.15-20240904`. Your own macros don't matter (they are replaced); only the hardware sections are compared. In `printer.cfg` only the stock sections may be there (`TEST_SPEED.cfg` and `[skew_correction]` are optional). With any other difference it stops, changes nothing, and writes a diff. Please send that diff in an Issue.
+   - The new config is made from v1.0.20. With an older version, step 3 lists the values that change to the v1.0.20 ones (for v1.0.15: probe and Z-tilt tolerances, filament runout pause delay, hotend fan temperature, resonance test range). Your X/Y `rotation_distance` stays as it is (v1.0.20 uses 39.971 instead of 40).
+   - Before v1.0.20 the vendor config has no chamber temperature sensor (`[temperature_sensor CHAMBER]`, pin PB0). Step 3 leaves it out for those versions. If your printer has the sensor, you can copy that section from `files/config/printer_config.cfg` afterwards. If nothing is connected to PB0, Klipper stops with an error, so don't add it blindly.
 3. Run every step with the printer idle.
 4. Power-cycle with the button. Never use `reboot`.
 5. In Windows, use **cmd** (not PowerShell) for commands with `<` or `>`.
@@ -107,7 +109,7 @@ Back to the stock screen: `chroot /server/tmp bash /home/gem/infimech/screen.sh 
 
 ## What's in `files/`
 - `config/`: the mainline config templates.
-- `vendor_expected/`: the stock `printer_config.cfg` (v1.0.20) they were made from, with placeholders for the lines that differ per printer.
+- `vendor_expected/`: the stock `printer_config.cfg` of each known vendor version (v1.0.20 from the author's printer; v1.0.15, v1.0.17 and v1.0.18 from the public backup [Loaf-God7/TXv2-Backup](https://github.com/Loaf-God7/TXv2-Backup)), with placeholders for the lines that differ per printer.
 - `make_config.py`: builds `config_new` from the templates and your stock config.
 - The add-on modules, the start scripts (`kp.sh`, `local_mcu.sh`, `which_klipper.sh`, `klipper_links.sh`), the service loop and `supervisorctl` stand-in, and the screen files.
 - The v0.14.0 STM32 command dictionary, used for offline checks.

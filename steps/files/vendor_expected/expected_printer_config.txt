@@ -115,7 +115,7 @@ rotation_distance: 8
 microsteps: 16
 [tmc2209 stepper_z1]
 uart_pin: PB1
-interpolate: False
+interpolate: True
 run_current: 0.85
 hold_current: 0.5
 # sense_resistor: 0.110
@@ -152,7 +152,7 @@ heater_pin: PC6
 sensor_type: EPCOS 100K B57560G104F
 sensor_pin: PC1
 max_power: 1.0
-min_temp: 0
+min_temp: -200
 max_temp: 310
 min_extrude_temp: 130
 max_extrude_cross_section:20
@@ -180,7 +180,7 @@ sensor_pin: PC0
 #pid_Kp=66.771
 #pid_Ki=0.814
 #pid_Kd=1369.644
-min_temp: 0
+min_temp: -200
 max_temp: 120
 # 热床温度PID校准命令：  "PID_CALIBRATE HEATER=heater_bed TARGET=100"
 

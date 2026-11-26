@@ -17,8 +17,13 @@
 # changes don't matter (they stay in the backup, config_stock).
 # A different hardware part means a different vendor config: it stops,
 # writes a diff, and builds nothing.
+# printer.cfg (the short main file) is checked section by section: only the
+# stock sections are allowed (includes, virtual_sdcard, mcu rpi,
+# smart_effector, heater_bed, and optionally extruder PID and an empty
+# skew_correction). TEST_SPEED.cfg is optional.
 # Carried over from your config: the SAVE_CONFIG block of printer.cfg (your
-# calibration), z_offset and bed PID from printer.cfg, the nozzle wipe depths.
+# calibration), z_offset, bed PID and (if set there) extruder PID from
+# printer.cfg, the nozzle wipe depths.
 #
 # Exit codes: 0 built, 2 refused (nothing built), 1 unexpected error.
 import argparse
@@ -34,7 +39,9 @@ CLEAN_FILES = ['printer_config.cfg', 'fans_stock.cfg', 'fans_mainline.cfg',
 SAVEVARS_OK = ['/klipper/config/saved_variables.cfg',
                '/printer_data/saved_variables.cfg']
 # carried over unchanged; must exist (printer.cfg includes them)
-REQUIRED = ['fluidd.cfg', 'timelapse.cfg', 'init.cfg', 'TEST_SPEED.cfg']
+REQUIRED = ['fluidd.cfg', 'timelapse.cfg', 'init.cfg']
+# carried over if present; the include line is left out if it is missing
+OPTIONAL = ['TEST_SPEED.cfg']
 # replaced or no longer used: left out of the new folder (still in backup)
 DROP = ['printer.cfg', 'printer_config.cfg', 'KAMP_Settings.cfg', 'KAMP']
 DROP_RE = re.compile(r'^printer_config\.cfg\.bak-')
@@ -133,27 +140,90 @@ def normalize_printer_config(lines, found):
     return strip_tail(out)
 
 
-def normalize_printer_main(lines, found):
-    out = list(lines)
-    paths = []
-    for i, sec in section_of(lines):
-        if sec == 'virtual_sdcard':
-            m = re.match(r'^path\s*[:=]\s*(\S+)$', lines[i])
-            if m:
-                paths.append(m.group(1))
-                out[i] = 'path:@GCODES@'
-    found['gcodes'] = paths
-    # per-printer values in the main file: carried over, not compared
-    cal = {}
-    for i, sec in section_of(lines):
-        m = re.match(r'^(z_offset|pid_Kp|pid_Ki|pid_Kd)\s*[:=]\s*(-?[0-9.]+)\s*$', lines[i])
-        if m and sec in ('smart_effector', 'heater_bed'):
-            key = {'z_offset': '@ZOFFSET@', 'pid_Kp': '@BED_KP@',
-                   'pid_Ki': '@BED_KI@', 'pid_Kd': '@BED_KD@'}[m.group(1)]
-            cal.setdefault(key, []).append(m.group(2))
-            out[i] = m.group(1) + ':' + key
-    found['cal'] = cal
-    return strip_tail(out)
+# printer.cfg main part: allowed sections and options. A value of None means
+# "any value, carried over"; a string is the only value allowed.
+MAIN_INCLUDES_REQUIRED = {'fluidd.cfg', 'timelapse.cfg', 'printer_config.cfg'}
+MAIN_INCLUDES_OPTIONAL = {'test_speed.cfg'}
+MAIN_SECTIONS = {
+    'virtual_sdcard': {'path': None, 'on_error_gcode': 'CANCEL_PRINT'},
+    'mcu rpi': {'serial': '/tmp/klipper_host_mcu'},
+    'smart_effector': {'z_offset': None},
+    'heater_bed': {'control': 'pid', 'pid_kp': None, 'pid_ki': None,
+                   'pid_kd': None},
+    'extruder': {'control': 'pid', 'pid_kp': None, 'pid_ki': None,
+                 'pid_kd': None},
+    'skew_correction': {},
+}
+NUM_RE = re.compile(r'^-?[0-9]+(\.[0-9]+)?$')
+
+
+def check_printer_main(lines, diff_path):
+    """Check the main part of printer.cfg; return {section: {option: value}}."""
+    vals, bad, includes, sec = {}, [], set(), None
+    for n, raw in enumerate(lines, 1):
+        l = re.sub(r'\s+[#;].*$', '', raw).strip()
+        if not l or l.startswith(('#', ';')):
+            continue
+        if raw[0] in ' \t':
+            bad.append((n, raw, 'unexpected indented line'))
+            continue
+        m = re.match(r'^\[include\s+([^\]]+)\]$', l)
+        if m:
+            name = m.group(1).strip()
+            if name.lower() not in {x.lower() for x in
+                                    MAIN_INCLUDES_REQUIRED} | MAIN_INCLUDES_OPTIONAL:
+                bad.append((n, raw, 'unexpected include'))
+            includes.add(name.lower())
+            sec = None
+            continue
+        m = re.match(r'^\[([^\]]+)\]$', l)
+        if m:
+            sec = ' '.join(m.group(1).lower().split())
+            if sec not in MAIN_SECTIONS:
+                bad.append((n, raw, 'unexpected section'))
+                sec = '!'
+            elif sec in vals:
+                bad.append((n, raw, 'section appears twice'))
+            vals.setdefault(sec, {})
+            continue
+        if sec == '!':
+            continue
+        m = re.match(r'^([A-Za-z0-9_]+)\s*[:=]\s*(.*)$', l)
+        if not m or sec is None:
+            bad.append((n, raw, 'unexpected line'))
+            continue
+        key, val = m.group(1).lower(), m.group(2).strip()
+        allowed = MAIN_SECTIONS[sec]
+        if key not in allowed:
+            bad.append((n, raw, 'unexpected option in [%s]' % sec))
+        elif allowed[key] is not None and val.lower() != allowed[key].lower():
+            bad.append((n, raw, 'expected %s: %s' % (key, allowed[key])))
+        elif allowed[key] is None and key != 'path' and not NUM_RE.match(val):
+            bad.append((n, raw, 'not a number'))
+        else:
+            vals[sec][key] = val
+    for name in sorted(MAIN_INCLUDES_REQUIRED):
+        if name.lower() not in includes:
+            bad.append((0, '[include %s]' % name, 'missing'))
+    for sec, need in (('virtual_sdcard', ['path']), ('mcu rpi', ['serial']),
+                      ('smart_effector', ['z_offset']),
+                      ('heater_bed', ['control', 'pid_kp', 'pid_ki', 'pid_kd'])):
+        for k in need:
+            if k not in vals.get(sec, {}):
+                bad.append((0, '[%s] %s' % (sec, k), 'missing'))
+    ext = vals.get('extruder', {})
+    if ext and set(ext) != {'control', 'pid_kp', 'pid_ki', 'pid_kd'}:
+        bad.append((0, '[extruder] %s' % ' '.join(sorted(ext)),
+                    'expected control, pid_Kp, pid_Ki, pid_Kd together'))
+    if bad:
+        with open(diff_path, 'a') as f:
+            f.write('printer.cfg (main part, above SAVE_CONFIG): lines not '
+                    'in the stock file\n')
+            for n, raw, why in bad:
+                f.write('  line %s: %s    <- %s\n' % (n or '-', raw.strip(), why))
+        raise Refused("printer.cfg has lines that are not in the stock file "
+                      "(see %s)" % (diff_path,))
+    return vals
 
 
 MACRO_SECTIONS = ('gcode_macro', 'delayed_gcode')
@@ -284,26 +354,37 @@ def build(args):
         main, block = pl[:k], strip_tail(pl[k:])
     else:
         main, block = pl, []
-    pm = normalize_printer_main(main, found)
-    compare('printer.cfg', pm,
-            os.path.join(tpl, 'expected_printer_main.txt'), diff_path,
-            lambda ls: [re.sub(r'\s*[:=]\s*', ':', l, count=1) for l in ls
-                        if l.strip() and not l.lstrip().startswith(('#', ';'))])
-    cal = {}
-    for k in ('@ZOFFSET@', '@BED_KP@', '@BED_KI@', '@BED_KD@'):
-        v = sorted(set(found['cal'].get(k, [])))
-        if len(v) != 1:
-            raise Refused("printer.cfg: expected one %s value, found %s" % (k.strip('@'), v or 'none'))
-        cal[k] = v[0]
-    gcodes = one_value(found, 'gcodes', 'virtual_sdcard path')
+    mv = check_printer_main(main, diff_path)
+    bed = mv['heater_bed']
+    cal = {'@ZOFFSET@': mv['smart_effector']['z_offset'],
+           '@BED_KP@': bed['pid_kp'], '@BED_KI@': bed['pid_ki'],
+           '@BED_KD@': bed['pid_kd']}
+    gcodes = mv['virtual_sdcard']['path']
     if gcodes.rstrip('/') != home + '/printer_data/gcodes':
         raise Refused("virtual_sdcard path is %s, expected %s"
                       % (gcodes, home + '/printer_data/gcodes'))
+    # extruder PID: in the SAVE_CONFIG block (after PID_CALIBRATE) or in the
+    # main part (factory value); the main-part value is carried over only if
+    # the block has none
+    block_ext = {k for s_, k in autosave_options(block) if s_ == 'extruder'}
+    ext = mv.get('extruder', {})
+    if {'pid_kp', 'pid_ki', 'pid_kd'} <= block_ext:
+        ext_pid, ext_src = '', 'SAVE_CONFIG block'
+    elif ext:
+        ext_pid = ('\n[extruder]\ncontrol: pid\npid_Kp: %s\npid_Ki: %s\n'
+                   'pid_Kd: %s\n' % (ext['pid_kp'], ext['pid_ki'], ext['pid_kd']))
+        ext_src = 'printer.cfg %s %s %s' % (ext['pid_kp'], ext['pid_ki'],
+                                            ext['pid_kd'])
+    else:
+        raise Refused("no extruder PID found (neither in printer.cfg nor in "
+                      "its SAVE_CONFIG block)")
+    optional = [f for f in OPTIONAL if os.path.isfile(os.path.join(old, f))]
 
     # --- render the clean files
     values = {'@H@': home, '@MCU_SERIAL@': serial,
               '@WIPE1@': wipe1, '@WIPE2@': wipe2}
     values.update(cal)
+    values['@EXTRUDER_PID@'] = ext_pid
     rendered = {}
     for f in CLEAN_FILES + ['printer.cfg']:
         with open(os.path.join(tpl, f)) as fh:
@@ -314,6 +395,10 @@ def build(args):
         if left:
             raise Refused("template %s: unfilled %s" % (f, left))
         rendered[f] = text
+    for f in OPTIONAL:
+        if f not in optional:
+            rendered['printer.cfg'] = rendered['printer.cfg'].replace(
+                '[include %s]\n' % f, '')
     if block:
         rendered['printer.cfg'] = (rendered['printer.cfg'].rstrip('\n')
                                    + '\n\n' + '\n'.join(block) + '\n')
@@ -325,7 +410,7 @@ def build(args):
         if f == 'fans_mainline.cfg':
             continue
         included |= parse_cfg_options(rendered[f].split('\n'))
-    for f in REQUIRED:
+    for f in REQUIRED + optional:
         included |= parse_cfg_options(read_lines(os.path.join(old, f)))
     clash = sorted(autosave_options(block) & included)
     if clash:
@@ -360,6 +445,7 @@ def build(args):
     print("wipe depths kept:      %s and %s mm" % (wipe1, wipe2))
     print("z_offset, bed PID:     %s / %s %s %s" % (cal['@ZOFFSET@'], cal['@BED_KP@'],
                                                     cal['@BED_KI@'], cal['@BED_KD@']))
+    print("extruder PID:          from the %s" % (ext_src,))
     print("SAVE_CONFIG block:     %d lines carried over" % (len(block),))
     print("carried over as is:    %s" % (' '.join(kept),))
     print("left out (in backup):  %s" % (' '.join(dropped),))
@@ -380,11 +466,7 @@ def main():
         found = {}
         pc = normalize_printer_config(
             read_lines(os.path.join(args.old, 'printer_config.cfg')), found)
-        pl = read_lines(os.path.join(args.old, 'printer.cfg'))
-        main_part = pl[:pl.index(MARKER)] if MARKER in pl else pl
-        pm = normalize_printer_main(main_part, found)
-        for name, lines in (('expected_printer_config.txt', pc),
-                            ('expected_printer_main.txt', pm)):
+        for name, lines in (('expected_printer_config.txt', pc),):
             with open(os.path.join(args.templates, name), 'w') as f:
                 f.write('\n'.join(lines) + '\n')
         print(found)

@@ -88,6 +88,15 @@ Folder `5_debian12/`. The Debian 12 system is built on the PC from a copy of **y
    ssh root@<PRINTER_IP> "sh -s" < ~/fw/steps/5_debian12/deb12_after.sh > deb12_after.txt 2>&1   # after the power cycle
    ```
    Way back: `deb12_rollback.sh` (renames back), then power-cycle. Keep `/server/tmp_deb11` until you're sure.
+6. **Later, when you're sure:** snapshot both systems to the PC, then remove the old Debian 11 to free its space. In the Ubuntu window, with the printer idle (Moonraker is stopped for a few minutes during the Debian 12 copy; G-code files, timelapse files and caches are left out of it):
+   ```
+   bash ~/fw/steps/5_debian12/pc_snapshot.sh <PRINTER_IP>      # -> ~/fw/snapshots/deb11-<date>.tar.gz, deb12-<date>.tar.gz
+   ssh root@<PRINTER_IP> "sh -s" < ~/fw/steps/5_debian12/deb11_remove.sh
+   ```
+   `deb11_remove.sh` only runs after a checked Debian 11 snapshot (the marker `/server/tmp_deb11/.snapshot_ok`). After it, `deb12_rollback.sh` needs the old system back first:
+   ```
+   ssh root@<PRINTER_IP> "[ ! -e /server/tmp_deb11 ] && mkdir /server/tmp/root/deb11_restore && chroot /server/tmp tar --numeric-owner -xpzf - -C /root/deb11_restore && mv /server/tmp/root/deb11_restore /server/tmp_deb11" < ~/fw/snapshots/deb11-<date>.tar.gz
+   ```
 
 After step 5, run `scripts/fw_update.sh` once. It rebuilds the host MCU program with Debian 12's compiler.
 

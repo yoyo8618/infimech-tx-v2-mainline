@@ -7,13 +7,18 @@
 # Reads DIR (the stock printer_data/config) and writes a complete new config
 # folder to --out. Nothing in --old is changed.
 #
-# Before building, it checks that the stock printer_config.cfg and the main
-# part of printer.cfg are exactly the vendor config these templates were made
-# from (#OCTO-v1.0.20-20250430 / #OCTO-printer.cfg-v1.0.1-20240925), apart
-# from the few lines it knows may differ (MCU serial, bed heater check time,
-# wipe depths, SAVE_CONFIG macro, file paths). Anything else means a
-# different vendor config: it stops, writes a diff, and builds nothing.
-# Your own calibration (the SAVE_CONFIG block of printer.cfg) is carried over.
+# Before building, it checks that the HARDWARE part of the stock config is
+# the one these templates were made from (#OCTO-v1.0.20-20250430 /
+# #OCTO-printer.cfg-v1.0.1-20240925): every section of printer_config.cfg
+# except the macros ([gcode_macro ...], [delayed_gcode ...]), compared without
+# comments, apart from the few values that may differ per printer (MCU
+# serial, bed heater check time, save_variables file). Macros are not
+# compared: the mainline config replaces all of them, so your own macro
+# changes don't matter (they stay in the backup, config_stock).
+# A different hardware part means a different vendor config: it stops,
+# writes a diff, and builds nothing.
+# Carried over from your config: the SAVE_CONFIG block of printer.cfg (your
+# calibration), z_offset and bed PID from printer.cfg, the nozzle wipe depths.
 #
 # Exit codes: 0 built, 2 refused (nothing built), 1 unexpected error.
 import argparse
@@ -138,11 +143,39 @@ def normalize_printer_main(lines, found):
                 paths.append(m.group(1))
                 out[i] = 'path:@GCODES@'
     found['gcodes'] = paths
+    # per-printer values in the main file: carried over, not compared
+    cal = {}
+    for i, sec in section_of(lines):
+        m = re.match(r'^(z_offset|pid_Kp|pid_Ki|pid_Kd)\s*[:=]\s*(-?[0-9.]+)\s*$', lines[i])
+        if m and sec in ('smart_effector', 'heater_bed'):
+            key = {'z_offset': '@ZOFFSET@', 'pid_Kp': '@BED_KP@',
+                   'pid_Ki': '@BED_KI@', 'pid_Kd': '@BED_KD@'}[m.group(1)]
+            cal.setdefault(key, []).append(m.group(2))
+            out[i] = m.group(1) + ':' + key
+    found['cal'] = cal
     return strip_tail(out)
 
 
-def compare(name, have, expected_path, diff_path):
+MACRO_SECTIONS = ('gcode_macro', 'delayed_gcode')
+
+
+def hardware_only(lines):
+    """Lines outside macro sections, without comments and blank lines."""
+    out, skip = [], False
+    for l in lines:
+        m = re.match(r'^\[([^\]]+)\]', l)
+        if m:
+            skip = m.group(1).strip().lower().startswith(MACRO_SECTIONS)
+        if skip or not l.strip() or l.lstrip().startswith(('#', ';')):
+            continue
+        out.append(re.sub(r'\s+[#;].*$', '', l).rstrip())
+    return out
+
+
+def compare(name, have, expected_path, diff_path, filt=None):
     want = strip_tail(read_lines(expected_path))
+    if filt:
+        have, want = filt(have), filt(want)
     if have == want:
         return
     diff = difflib.unified_diff(want, have, 'expected/' + name,
@@ -151,6 +184,17 @@ def compare(name, have, expected_path, diff_path):
         f.write('\n'.join(diff) + '\n')
     raise Refused("%s differs from what this package expects (see %s)"
                   % (name, diff_path))
+
+
+def wipe_value(found, key, default):
+    # the nozzle wipe depth of the stock clean_nozzle_position macro; if the
+    # macro was changed (or copied) and the values disagree: the stock value
+    vals = sorted(set(v for v in found[key] if re.match(r'^-0\.\d+$', v)))
+    if len(vals) == 1 and -0.5 <= float(vals[0]) <= 0:
+        return vals[0]
+    print("note: nozzle wipe depth %s: found %s, using the stock %s"
+          % (key, vals or 'none', default))
+    return default
 
 
 def one_value(found, key, what, allowed=None):
@@ -218,19 +262,18 @@ def build(args):
     pc = normalize_printer_config(
         read_lines(os.path.join(old, 'printer_config.cfg')), found)
     compare('printer_config.cfg', pc,
-            os.path.join(tpl, 'expected_printer_config.txt'), diff_path)
+            os.path.join(tpl, 'expected_printer_config.txt'), diff_path,
+            hardware_only)
     serial = one_value(found, 'serials', 'MCU serial')
     if not serial.startswith('/dev/serial/by-id/usb-Klipper_stm32f072xb_'):
         raise Refused("unexpected MCU serial %s" % (serial,))
     gain = one_value(found, 'gains', 'bed check_gain_time', ['60', '400'])
-    wipe1 = one_value(found, 'wipe1', 'first wipe depth', ['-0.15', '-0.10'])
-    wipe2 = one_value(found, 'wipe2', 'second wipe depth', ['-0.2', '-0.15'])
+    wipe1 = wipe_value(found, 'wipe1', '-0.15')
+    wipe2 = wipe_value(found, 'wipe2', '-0.2')
     savevars = one_value(found, 'savevars', 'save_variables file')
     if savevars not in [home + p for p in SAVEVARS_OK]:
         raise Refused("save_variables file is %s, expected one of %s"
                       % (savevars, [home + p for p in SAVEVARS_OK]))
-    if 'save_config_macro' not in found:
-        raise Refused("SAVE_CONFIG macro not as expected")
 
     # --- printer.cfg: main part checked, SAVE_CONFIG block carried over
     pl = read_lines(os.path.join(old, 'printer.cfg'))
@@ -243,7 +286,15 @@ def build(args):
         main, block = pl, []
     pm = normalize_printer_main(main, found)
     compare('printer.cfg', pm,
-            os.path.join(tpl, 'expected_printer_main.txt'), diff_path)
+            os.path.join(tpl, 'expected_printer_main.txt'), diff_path,
+            lambda ls: [re.sub(r'\s*[:=]\s*', ':', l, count=1) for l in ls
+                        if l.strip() and not l.lstrip().startswith(('#', ';'))])
+    cal = {}
+    for k in ('@ZOFFSET@', '@BED_KP@', '@BED_KI@', '@BED_KD@'):
+        v = sorted(set(found['cal'].get(k, [])))
+        if len(v) != 1:
+            raise Refused("printer.cfg: expected one %s value, found %s" % (k.strip('@'), v or 'none'))
+        cal[k] = v[0]
     gcodes = one_value(found, 'gcodes', 'virtual_sdcard path')
     if gcodes.rstrip('/') != home + '/printer_data/gcodes':
         raise Refused("virtual_sdcard path is %s, expected %s"
@@ -252,6 +303,7 @@ def build(args):
     # --- render the clean files
     values = {'@H@': home, '@MCU_SERIAL@': serial,
               '@WIPE1@': wipe1, '@WIPE2@': wipe2}
+    values.update(cal)
     rendered = {}
     for f in CLEAN_FILES + ['printer.cfg']:
         with open(os.path.join(tpl, f)) as fh:
@@ -306,8 +358,8 @@ def build(args):
     print("bed check_gain_time:   %s -> 60%s" % (
         gain, '' if gain == '60' else '  (the value recommended earlier)'))
     print("wipe depths kept:      %s and %s mm" % (wipe1, wipe2))
-    print("SAVE_CONFIG macro:     %s version found; no longer needed"
-          % (found['save_config_macro'],))
+    print("z_offset, bed PID:     %s / %s %s %s" % (cal['@ZOFFSET@'], cal['@BED_KP@'],
+                                                    cal['@BED_KI@'], cal['@BED_KD@']))
     print("SAVE_CONFIG block:     %d lines carried over" % (len(block),))
     print("carried over as is:    %s" % (' '.join(kept),))
     print("left out (in backup):  %s" % (' '.join(dropped),))

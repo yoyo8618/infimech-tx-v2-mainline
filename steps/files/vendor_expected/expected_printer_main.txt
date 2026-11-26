@@ -11,12 +11,12 @@ on_error_gcode: CANCEL_PRINT
 [mcu rpi]
 serial: /tmp/klipper_host_mcu
 [smart_effector]
-z_offset: -0.02
+z_offset:@ZOFFSET@
 [heater_bed]
 control: pid
-pid_Kp=66.771
-pid_Ki=0.814
-pid_Kd=1369.644
+pid_Kp:@BED_KP@
+pid_Ki:@BED_KI@
+pid_Kd:@BED_KD@
 [skew_correction]
 
 [extruder]

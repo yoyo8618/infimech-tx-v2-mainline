@@ -13,6 +13,8 @@
 
 **What stays vendor:** Tina Linux and its 4.9 kernel. No mainline kernel supports the V853's display and Wi-Fi yet. Debian runs in Tina's chroot at `/server/tmp`, as on stock.
 
+**How to use this guide:** do steps 1 and 2 below by hand. Then do steps 3–7 with the scripts, following **[`steps/README.md`](steps/README.md)**. Do step 8 after every Klipper update. Sections 3–7 below explain what the scripts do and why; you don't type those parts yourself.
+
 **You need:** root SSH to the printer, a Windows PC with WSL (Ubuntu 24.04), and patience. Use **cmd, not PowerShell**, for `ssh ... < file` and `> file`. **Power-cycle with the button, never `reboot`**: a soft reboot can leave the board black.
 
 ---
@@ -46,6 +48,9 @@ What to do:
 After the conversion, mainline updates come only from Fluidd (Settings → Software Updates). Nothing updates by itself: Moonraker's automatic refresh is off, and HelixScreen's own updater is disabled.
 
 ## 3. Mainline Klipper next to stock
+
+> Sections 3–7 explain what the step scripts do. To run them, follow [`steps/README.md`](steps/README.md).
+
 
 - Install Klipper v0.14.0 in `/home/gem/klipper-new` and build the host MCU on the printer (`CONFIG_MACH_LINUX=y`).
 - Copy the vendor config to `config_new` and edit only the copy:
@@ -143,4 +148,5 @@ License: GPLv3 (see `LICENSE`). The STM32 firmware is built from unmodified Klip
 ## Feedback wanted (please open an Issue)
 - Do you have a TX V2, or a Flying Bear S1 (reportedly the same hardware)? Which stock firmware version (stock screen firmware, and the `#OCTO-…` marker in the vendor config)?
 - Does your kernel also report `4.9.191`?
-- Would you try an installer, and with which parts: Klipper only, or the full Debian 12 setup?
+- Did a step script stop you, or do something you didn't expect? Please attach its `--check` output, or for step 3, `step3-config.diff`.
+- Did you do only part of it (for example Klipper and HelixScreen, without Debian 12)? Did that work?

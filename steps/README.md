@@ -98,7 +98,14 @@ Folder `5_debian12/`. The Debian 12 system is built on the PC from a copy of **y
    ssh root@<PRINTER_IP> "[ ! -e /server/tmp_deb11 ] && mkdir /server/tmp/root/deb11_restore && chroot /server/tmp tar --numeric-owner -xpzf - -C /root/deb11_restore && mv /server/tmp/root/deb11_restore /server/tmp_deb11" < ~/fw/snapshots/deb11-<date>.tar.gz
    ```
 
-After step 5, run `scripts/fw_update.sh` once. It rebuilds the host MCU program with Debian 12's compiler.
+**After step 5, rebuild the host MCU program once** with Debian 12's compiler. This also puts `fw_update.sh` on the printer for step 8. In cmd, in the repository folder (the one with `steps` and `scripts`):
+```
+ssh root@<PRINTER_IP> "cat > /server/tmp/home/gem/infimech/firmware/fw_update.sh" < scripts\fw_update.sh
+ssh root@<PRINTER_IP> "cp /server/tmp/home/gem/infimech/steps/files/klipper-v0.14.0-stm32f072-mainboard.dict /server/tmp/home/gem/infimech/firmware/"
+ssh root@<PRINTER_IP> "chroot /server/tmp bash /home/gem/infimech/firmware/fw_update.sh --host-only --check" > fw_check.txt 2>&1
+ssh root@<PRINTER_IP> "chroot /server/tmp bash /home/gem/infimech/firmware/fw_update.sh --host-only" > fw_update.txt 2>&1
+```
+The `.dict` file lets it check your config offline against the STM32 firmware before it changes anything. `--host-only` leaves the STM32 alone (it already has v0.14.0 from step 4). The update runs on the printer even if the SSH window closes; its log is `/home/gem/infimech/firmware/fw_update.log`.
 
 ## Step 7 – HelixScreen (in the chroot)
 ```
@@ -114,7 +121,7 @@ This needs step 4.
 Back to the stock screen: `chroot /server/tmp bash /home/gem/infimech/screen.sh stock`.
 
 ## Step 8 – after every Klipper update
-`scripts/fw_build.sh` on the PC, then `scripts/fw_update.sh` on the printer. See the main README.
+After Fluidd updates Klipper, the firmware must match the new version. Build it on the PC with `scripts/fw_build.sh`, which makes `fw-<version>.tar` (firmware, checksum, `.dict` and the current `fw_update.sh`), then run `fw_update.sh` on the printer. The commands are in step 8 of the [main README](../README.md#8-after-every-klipper-update-the-routine-part).
 
 ## What's in `files/`
 - `config/`: the mainline config templates.

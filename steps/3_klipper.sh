@@ -126,11 +126,16 @@ say "8. offline config check: a test print in batch mode (no hardware used)"
 CT=$G/infimech/step3-check-tmp
 rm -rf "$CT" && cp -a "$CFG_NEW" "$CT"
 sed -i 's/^manage_thresholds: .*/manage_thresholds: off/' "$CT/infimech.cfg"   # no bed sensor in batch mode
+# In batch mode the probe "touches" at stepper_z position_min, so the simulated
+# mesh sits at position_min minus z_offset and the wipe moves would go below
+# position_min ("Move out of range"). The test copy uses z_offset -1 to keep
+# them in range; the real config keeps the owner's value.
+sed -i 's/^z_offset: .*/z_offset: -1/' "$CT/printer.cfg"
 (cd "$NEW" && "$PY" klippy/klippy.py "$CT/printer.cfg" -i "$G/infimech/clean/check_print_start.gcode" -o /dev/null \
     -d "$DICT" -d "rpi=$HOSTDIR/klipper.dict" -l "$G/infimech/step3_check.log" > /dev/null 2>&1)
 rc=$?
 rm -rf "$CT"
-[ $rc = 0 ] || { grep -a -E "^(Config error|Error)|error" "$G/infimech/step3_check.log" | tail -n 15; die "offline check failed (exit $rc), log: $G/infimech/step3_check.log"; }
+[ $rc = 0 ] || { grep -a -E "^(Config error|Error)|error|out of range" "$G/infimech/step3_check.log" | tail -n 15; die "offline check failed (exit $rc), log: $G/infimech/step3_check.log"; }
 note "offline check passed"
 
 say "DONE - Klipper $TAG is installed next to stock. Nothing running was changed."

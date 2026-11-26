@@ -19,12 +19,6 @@ square_corner_velocity: 5.0
 sensor_type: temperature_mcu
 [temperature_sensor HOST]
 sensor_type: temperature_host
-[temperature_sensor CHAMBER]
-sensor_type: NTC 100K MGB18-104F39050L32
-sensor_pin: PB0
-min_temp: 0
-max_temp: 100
-gcode_id: C
 [stepper_x]
 step_pin: PC15
 dir_pin: PC14

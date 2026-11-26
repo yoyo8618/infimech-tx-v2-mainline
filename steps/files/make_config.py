@@ -18,8 +18,10 @@
 # backup, config_stock). A different hardware part means a different vendor
 # config: it stops, writes a diff, and builds nothing.
 # The templates were made from v1.0.20. With an older version the new config
-# uses the v1.0.20 values; the differences are printed. The chamber sensor
-# (new in v1.0.20) is left out if your config does not have it.
+# uses the v1.0.20 values; the differences are printed.
+# Not compared, carried over: a [temperature_sensor CHAMBER] section (not in
+# any vendor config; an owner addition). Not compared: [printer]
+# minimum_cruise_ratio: 0.5 (Klipper's default).
 # printer.cfg (the short main file) is checked section by section: only the
 # stock sections are allowed (includes, virtual_sdcard, mcu rpi,
 # smart_effector, heater_bed, and optionally extruder PID and an empty
@@ -248,14 +250,21 @@ def check_printer_main(lines, diff_path):
 MACRO_SECTIONS = ('gcode_macro', 'delayed_gcode', 'homing_override')
 
 
+OWNER_SECTIONS = ('temperature_sensor chamber',)
+DEFAULT_LINES = re.compile(r'^minimum_cruise_ratio\s*[:=]\s*0\.5\s*$')
+
+
 def hardware_only(lines):
     """Lines outside macro sections, without comments and blank lines."""
     out, skip = [], False
     for l in lines:
         m = re.match(r'^\[([^\]]+)\]', l)
         if m:
-            skip = m.group(1).strip().lower().startswith(MACRO_SECTIONS)
+            name = ' '.join(m.group(1).strip().lower().split())
+            skip = name.startswith(MACRO_SECTIONS) or name in OWNER_SECTIONS
         if skip or not l.strip() or l.lstrip().startswith(('#', ';')):
+            continue
+        if DEFAULT_LINES.match(re.sub(r'\s+[#;].*$', '', l)):
             continue
         out.append(re.sub(r'\s+[#;].*$', '', l).rstrip())
     return out
@@ -364,8 +373,18 @@ def build(args):
             raise Refused("stepper_%s rotation_distance %s is outside 39-41"
                           % (axis, v))
         rot['@ROT_%s@' % axis.upper()] = v
-    chamber = any(l.strip().lower() == '[temperature_sensor chamber]'
-                  for l in pc_lines)
+    # an owner's chamber sensor section: carried over as it is
+    chamber, inside = [], False
+    for l in pc_lines:
+        m = re.match(r'^\[([^\]]+)\]', l)
+        if m:
+            inside = ' '.join(m.group(1).lower().split()) == 'temperature_sensor chamber'
+            if inside and chamber:
+                raise Refused("printer_config.cfg has two chamber sensor sections")
+        if inside:
+            chamber.append(l)
+    while chamber and (not chamber[-1].strip() or chamber[-1].lstrip().startswith(('#', ';'))):
+        chamber.pop()
     # values the v1.0.20 templates set differently from your vendor version
     newer = []
     if version != TEMPLATE_VERSION:
@@ -376,8 +395,7 @@ def build(args):
                 if m:
                     sec = m.group(1).strip()
                     continue
-                if sec.lower().startswith('include ') or (
-                        not chamber and sec.lower() == 'temperature_sensor chamber'):
+                if sec.lower().startswith('include '):
                     continue
                 out_.append('[%s] %s' % (sec, l.strip()))
             return out_
@@ -440,6 +458,7 @@ def build(args):
               '@WIPE1@': wipe1, '@WIPE2@': wipe2}
     values.update(cal)
     values.update(rot)
+    values['@CHAMBER@'] = '\n'.join(chamber) + '\n\n' if chamber else ''
     values['@EXTRUDER_PID@'] = ext_pid
     rendered = {}
     for f in CLEAN_FILES + ['printer.cfg']:
@@ -451,12 +470,6 @@ def build(args):
         if left:
             raise Refused("template %s: unfilled %s" % (f, left))
         rendered[f] = text
-    if not chamber:
-        text, n = re.subn(r'\n\[temperature_sensor CHAMBER\]\n(?:[^\n\[#][^\n]*\n)*', '\n',
-                          rendered['printer_config.cfg'])
-        if n != 1:
-            raise Refused("template printer_config.cfg: chamber sensor section not found")
-        rendered['printer_config.cfg'] = text
     for f in OPTIONAL:
         if f not in optional:
             rendered['printer.cfg'] = rendered['printer.cfg'].replace(
@@ -507,8 +520,7 @@ def build(args):
     for have, want in newer:
         print("    yours: %s -> new: %s" % ('; '.join(have) or '(not set)',
                                           '; '.join(want) or '(not set)'))
-    if not chamber:
-        print("chamber sensor:        not in your config, left out")
+    print("chamber sensor:        %s" % ('yours, carried over' if chamber else 'none'))
     print("X/Y rotation_distance: %s / %s (kept)" % (rot['@ROT_X@'], rot['@ROT_Y@']))
     print("MCU serial:            %s (step 4 sets the new one)" % (serial,))
     print("saved variables:       %s" % (savevars,))

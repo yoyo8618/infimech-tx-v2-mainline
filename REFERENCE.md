@@ -65,3 +65,4 @@ Findings from one stock TX V2 (Tina Linux, kernel 4.9.191, vendor config `#OCTO-
 - Any extra `.py` file or symlink in `klippy/extras/` makes Klipper log its
   version with "-dirty", even if git ignores the file. This is by design and
   is cosmetic.
+- HelixScreen v1.1.0 and later: one program, `bin/helix-screen`, for fbdev (`HELIX_DISPLAY_BACKEND=fbdev`); `helix-screen-fbdev` is gone. It holds `config/.helix-screen.lock`, and relaunches itself when Moonraker installs an update.

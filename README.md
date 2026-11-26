@@ -73,6 +73,16 @@ A vendor update can overwrite all of this. In your DNS (AdGuard, Pi-hole, router
 
 HelixScreen (`helixscreen-pi32`, fbdev) works at 480x272. Tina's boot animation (`/etc/init.d/show_start.sh`) keeps drawing on `/dev/fb0` until the stock screen stops it. When the stock screen isn't started, kill it yourself, or HelixScreen flickers.
 
+`scripts/boot/helix_run.sh` starts HelixScreen in place of the stock screen and keeps it running. If HelixScreen fails 3 times in 5 minutes, it brings the stock screen back.
+
+**Updating HelixScreen from Fluidd** (tested from v1.0.11 to v1.1.0). The chroot has no systemd, so the launcher does what HelixScreen's installer normally sets up:
+- `[update_manager helixscreen]` (`type: web`, in `config/infimech_moonraker.conf`).
+- Your HelixScreen files live in `printer_data/config/helixscreen/` and are linked into the install folder before every start. A Moonraker update deletes that folder, so this keeps them.
+- After an update, the launcher restarts HelixScreen once the new release is fully unpacked.
+- HelixScreen also relaunches itself on an update, outside the launcher. That copy holds its lock (`config/.helix-screen.lock`), so the launcher stops any copy it didn't start.
+- v1.1.0 has no `helix-screen-fbdev`. One program, `helix-screen`, does fbdev, and the launcher picks whichever the release has.
+- v1.1.0 may say this printer "looks like a Sovol SV06 ACE". It guesses that from Klipper's `smart_effector` module, which the TX uses for its piezo probe. Tap **Keep current**: the SV06 ACE profile adds settings meant for that printer, including a GPIO light pin.
+
 ## 8. After every Klipper update (the routine part)
 
 Update Klipper in Fluidd, then:

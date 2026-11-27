@@ -88,7 +88,7 @@ Folder `5_debian12/`. The Debian 12 system is built on the PC from a copy of **y
    ssh root@<PRINTER_IP> "sh -s" < ~/fw/steps/5_debian12/deb12_after.sh > deb12_after.txt 2>&1   # after the power cycle
    ```
    Way back: `deb12_rollback.sh` (renames back), then power-cycle. Keep `/server/tmp_deb11` until you're sure.
-6. **Later, when you're sure:** snapshot both systems to the PC, then remove the old Debian 11 to free its space. In the Ubuntu window, with the printer idle (Moonraker is stopped for a few minutes during the Debian 12 copy; G-code files, timelapse files and caches are left out of it):
+6. **Later, when you're sure:** snapshot both systems to the PC, then remove the old Debian 11 to free its space. In the Ubuntu window, with the printer idle (Moonraker is stopped for a few minutes during the Debian 12 copy). G-code files, timelapse videos and caches are left out of both snapshots. The switch hard-linked the G-code and timelapse files, so both systems share them: removing Debian 11 does not delete them, they stay in Debian 12.
    ```
    bash ~/fw/steps/5_debian12/pc_snapshot.sh <PRINTER_IP>      # -> ~/fw/snapshots/deb11-<date>.tar.gz, deb12-<date>.tar.gz
    ssh root@<PRINTER_IP> "sh -s" < ~/fw/steps/5_debian12/deb11_remove.sh
@@ -125,7 +125,7 @@ After Fluidd updates Klipper, the firmware must match the new version. Build it 
 
 ## What's in `files/`
 - `config/`: the mainline config templates.
-- `vendor_expected/`: the stock `printer_config.cfg` of each known vendor version (v1.0.20 from the author's printer; v1.0.15, v1.0.17 and v1.0.18 from the public backup [Loaf-God7/TXv2-Backup](https://github.com/Loaf-God7/TXv2-Backup)), with placeholders for the lines that differ per printer.
+- `vendor_expected/`: the stock `printer_config.cfg` of each known vendor version (v1.0.20 from the author's printer; v1.0.15, v1.0.17 and v1.0.18 from the public backup [Loaf-God7/TXv2-Backup](https://github.com/Loaf-God7/TXv2-Backup), used with its owner's permission), with placeholders for the lines that differ per printer.
 - `make_config.py`: builds `config_new` from the templates and your stock config.
 - The add-on modules, the start scripts (`kp.sh`, `local_mcu.sh`, `which_klipper.sh`, `klipper_links.sh`), the service loop and `supervisorctl` stand-in, and the screen files.
 - The v0.14.0 STM32 command dictionary, used for offline checks.

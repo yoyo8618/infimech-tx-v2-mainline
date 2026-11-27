@@ -33,17 +33,18 @@ Compare `md5sum` on the printer with `certutil -hashfile <file> MD5` on the PC.
 
 ## 2. Block vendor updates (do this first)
 
-**A vendor (Infimech/OctopusWorks) firmware update can undo all of this.** It's built for the stock layout. It's likely to replace Klipper and its config in `/server/tmp`, reflash the stock STM32 firmware and reset the start scripts. Your backup from step 1 would get you back, but it's easier not to let one in.
+**A vendor (Infimech/OctopusWorks) firmware update can undo all of this.** Tina installs it at boot with `/etc/init.d/remote_update`, whenever `/server/printer/zy3d_files.zip` exists (the stock screen downloads it there). The log it left on the author's printer from an earlier update shows what it does: it copies the package's `/etc`, `/opt` and `/server` over the system (Tina's start scripts, the stock screen, and the Klipper setup in `/server/tmp`), then writes the boot partitions with `dd`. The STM32 also gets the stock firmware again when the `updatestm32` marker is missing. Your backup from step 1 would get you back, but it's easier not to let one in.
 
 What's known about the stock software:
 - The update client is in the stock touchscreen app (`/opt/FdmPrinter`), which talks to `slice-update.octopusworks.com`. Whether it ever installs without asking is unknown, so treat it as if it could.
-- Tina's `Network_select` pings `update.octopusworks.com` in a loop to choose between Ethernet and Wi-Fi.
+- Tina's `Network_select` checks every 5 s. Only while an Ethernet cable is connected does it ping `update.octopusworks.com` (first over Ethernet, then over Wi-Fi) to choose the default route; with Wi-Fi only it always uses Wi-Fi.
 - The stock screen also has a raw address for uploading logs: `120.77.245.96:8084/printer/log/upload`. A DNS rule can't block a raw address.
 
 What to do:
-1. In your DNS (AdGuard Home, Pi-hole, router), add a rewrite for `*.octopusworks.com` pointing to **any local IP that answers ping** (another device on your network). Don't block the name outright: if the ping fails, Tina thinks the network is down and keeps switching between Ethernet and Wi-Fi.
-2. Optionally, block outgoing traffic to `120.77.245.96` in your router's firewall.
-3. Never accept an update offered on the stock screen. With HelixScreen installed, the stock screen only comes back as a fallback.
+1. In your DNS (AdGuard Home, Pi-hole, router), add a rewrite for `*.octopusworks.com` pointing to **any local IP that answers ping** (another device on your network). If you use an Ethernet cable, don't make the name fail outright: when both pings fail, `Network_select` swaps the default route between Ethernet and Wi-Fi every few seconds. Make sure **every** DNS server your router hands out has the rule; with a second server without it, the printer sometimes gets the real address.
+2. Block the vendor addresses on the printer itself, after step 5 (Debian 12): [`steps/extras/netblock.sh`](steps/extras/netblock.sh) installs Debian's `iptables`, loads Tina's own `iptable_filter` module at boot (one line in `/server/tmp/go.sh`; Tina's files don't change) and refuses TCP / drops UDP to `120.77.245.96` (also the log server) and `119.23.245.194`. At every boot and every 6 hours it looks both names up again and blocks any new public address. Ping stays allowed. `check`, `apply`, `status` and `undo` modes; see the comments at the top. Or block those addresses in your router's firewall.
+3. Before converting, check that `/server/printer/zy3d_files.zip` does not exist (`tools/tx_survey.sh` reports it).
+4. Never accept an update offered on the stock screen. With HelixScreen installed, the stock screen only comes back as a fallback.
 
 After the conversion, mainline updates come only from Fluidd (Settings → Software Updates). Nothing updates by itself: Moonraker's automatic refresh is off, and HelixScreen's own updater is disabled.
 
@@ -147,6 +148,7 @@ License: GPLv3 (see `LICENSE`). The STM32 firmware is built from unmodified Klip
 
 ## Feedback wanted (please open an Issue)
 - Do you have a TX V2, or a Flying Bear S1 (reportedly the same hardware)? Which stock firmware version (stock screen firmware, and the `#OCTO-…` marker in the vendor config)?
+- **Please run [`tools/tx_survey.sh`](tools/tx_survey.sh)** and attach its output to an Issue. It's read-only, takes about a minute, and masks IP and MAC addresses, the MCU chip ID and serial numbers. It shows whether your printer runs the same Tina, kernel and boot chain as the author's, which decides whether a prebuilt Debian 12 image and a one-step installer can work for everyone. Run it in cmd: `ssh root@<PRINTER_IP> "sh -s" < tx_survey.sh > tx_survey.txt 2>&1`
 - Does your kernel also report `4.9.191`?
 - Did a step script stop you, or do something you didn't expect? Please attach its `--check` output, or for step 3, `step3-config.diff`.
 - Did you do only part of it (for example Klipper and HelixScreen, without Debian 12)? Did that work?

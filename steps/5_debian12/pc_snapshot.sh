@@ -6,11 +6,14 @@
 #   bash ~/fw/pc_snapshot.sh <PRINTER_IP> deb12      # only the running Debian 12
 # It asks for the printer's root password once (one shared ssh connection).
 #
-# deb11: /server/tmp_deb11, the old Debian 11 (not running). Complete.
-# deb12: /server/tmp, the running Debian 12. Complete apart from G-code
-#        files, timelapse files and caches. Moonraker is stopped while it is
+# deb11: /server/tmp_deb11, the old Debian 11 (not running).
+# deb12: /server/tmp, the running Debian 12. Moonraker is stopped while it is
 #        copied (Fluidd and the screen lose the connection for a few
 #        minutes) and started again; Klipper keeps running.
+# Both are complete apart from G-code files, timelapse videos and caches.
+# The G-code and timelapse files are hard links shared by both systems
+# (made by deb12_switch.sh): removing Debian 11 does not delete them, they
+# stay in Debian 12. Copy them yourself if you want them on the PC.
 # The files go to ~/fw/snapshots (OUT=... to change it):
 #   deb11-<date>.tar.gz / deb12-<date>.tar.gz, each with a .sha256 file.
 # Each snapshot is checked: gzip test, number of entries against the
@@ -23,7 +26,9 @@ WHAT=${2:-both}
 OUT=${OUT:-$HOME/fw/snapshots}
 RS=${RS:-/server}                      # the printer's /server (changed only for tests)
 D=$(date +%Y%m%d-%H%M)
-EXCL12="/home/gem/printer_data/gcodes /home/gem/printer_data/timelapse /home/gem/.cache /root/.cache"
+# left out of both snapshots: G-code files and timelapse videos (the switch to
+# Debian 12 hard-linked them, so both systems share the same files), caches
+EXCL="/home/gem/printer_data/gcodes /home/gem/timelapse /home/gem/.cache /root/.cache"
 die() { echo "ERROR: $*"; exit 1; }
 say() { echo; echo "$(date +%H:%M:%S) === $*"; }
 case "$WHAT" in both|deb11|deb12) ;; *) die "second argument: both, deb11 or deb12" ;; esac
@@ -35,11 +40,11 @@ r() { "${SSH[@]}" "$@"; }
 trap 'ssh -o "ControlPath=$CP" -O exit "root@$IP" 2>/dev/null' EXIT
 
 # find options that select what tar packs (sockets are skipped by tar)
-prune12=""
-for p in $EXCL12; do prune12="$prune12 -path $p -o"; done
-prune12="\\( ${prune12% -o} \\) -prune -o"
-tarx12=""
-for p in $EXCL12; do tarx12="$tarx12 --exclude=.$p"; done
+prune=""
+for p in $EXCL; do prune="$prune -path $p -o"; done
+prune="\\( ${prune% -o} \\) -prune -o"
+tarx=""
+for p in $EXCL; do tarx="$tarx --exclude=.$p"; done
 
 say "1. checks on the printer (read only)"
 info=$(r sh -s <<EOF
@@ -52,11 +57,11 @@ n=0; for p in /proc/[0-9]*; do [ "\$(readlink \$p/root 2>/dev/null)" = "\$R/tmp_
 echo "procs11=\$n"
 echo "marker11=\$(cat \$R/tmp_deb11/.snapshot_ok 2>/dev/null | head -n 1)"
 if [ "$WHAT" != deb12 ] && [ -d \$R/tmp_deb11 ]; then
-    echo "kb11=\$(chroot \$R/tmp_deb11 du -sxk / 2>/dev/null | cut -f1)"
-    echo "n11=\$(chroot \$R/tmp_deb11 find / -xdev ! -type s 2>/dev/null | wc -l)"
+    echo "kb11=\$(chroot \$R/tmp_deb11 du -sxk / $(for p in $EXCL; do printf ' --exclude=%s' "$p"; done) 2>/dev/null | cut -f1)"
+    echo "n11=\$(chroot \$R/tmp_deb11 find / -xdev $prune ! -type s -print 2>/dev/null | wc -l)"
 fi
 if [ "$WHAT" != deb11 ]; then
-    echo "kb12=\$(chroot \$R/tmp du -sxk / $(for p in $EXCL12; do printf ' --exclude=%s' "$p"; done) 2>/dev/null | cut -f1)"
+    echo "kb12=\$(chroot \$R/tmp du -sxk / $(for p in $EXCL; do printf ' --exclude=%s' "$p"; done) 2>/dev/null | cut -f1)"
     echo "state=\$(chroot \$R/tmp python3 -c '
 import json, urllib.request
 try:
@@ -112,7 +117,7 @@ check() {
 if [ "$WHAT" != deb12 ]; then
     say "2. Debian 11 snapshot (/server/tmp_deb11)"
     F="$OUT/deb11-$D.tar.gz"
-    r "chroot $RS/tmp_deb11 tar --one-file-system --numeric-owner -cf - -C / .; echo TAR_RC=\$? >&2" \
+    r "chroot $RS/tmp_deb11 tar --one-file-system --numeric-owner $tarx -cf - -C / .; echo TAR_RC=\$? >&2" \
         2> "$F.log" | gzip -1 > "$F.part" || die "copy failed (see $F.log)"
     grep -q '^TAR_RC=0$' "$F.log" || { cat "$F.log"; die "tar on the printer reported an error"; }
     mv "$F.part" "$F"
@@ -127,10 +132,10 @@ fi
 if [ "$WHAT" != deb11 ]; then
     say "3. Debian 12 snapshot (/server/tmp, running; Moonraker stopped meanwhile)"
     F="$OUT/deb12-$D.tar.gz"
-    n12=$(r "chroot $RS/tmp sh -c 'find / -xdev $prune12 ! -type s -print 2>/dev/null | wc -l'")
+    n12=$(r "chroot $RS/tmp sh -c 'find / -xdev $prune ! -type s -print 2>/dev/null | wc -l'")
     r "L=$RS/tmp; chroot \$L /usr/local/bin/supervisorctl stop moonraker >&2
        trap 'chroot \$L /usr/local/bin/supervisorctl start moonraker >&2' EXIT HUP INT TERM PIPE
-       chroot \$L tar --one-file-system --numeric-owner --warning=no-file-ignored $tarx12 -cf - -C / .
+       chroot \$L tar --one-file-system --numeric-owner --warning=no-file-ignored $tarx -cf - -C / .
        echo TAR_RC=\$? >&2" 2> "$F.log" | gzip -1 > "$F.part" || die "copy failed (see $F.log)"
     # 1 = files changed while being read (logs of a running system): accepted
     grep -q '^TAR_RC=[01]$' "$F.log" || { cat "$F.log"; die "tar on the printer reported an error"; }
